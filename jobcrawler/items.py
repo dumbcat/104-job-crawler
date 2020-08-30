@@ -9,9 +9,10 @@ import scrapy
 class JobcrawlerItem(scrapy.Item):
     # define the fields for your item here like:
     # name = scrapy.Field()
-    areades = scrapy.Field()
-    job_titile = scrapy.Field()
-    company = scrapy.Field()
-    company_type = scrapy.Field()
-    experience = scrapy.Field()
-    link = scrapy.Field()
+    areades = scrapy.Field() # The name of the job area
+    city_no = scrapy.Field()
+    job_titile = scrapy.Field() # job name
+    company = scrapy.Field() # Company name
+    company_type = scrapy.Field() # Company type
+    experience = scrapy.Field() # job experience requirements
+    link = scrapy.Field() # job web page link
