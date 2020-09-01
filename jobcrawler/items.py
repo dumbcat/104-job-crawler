@@ -16,3 +16,4 @@ class JobcrawlerItem(scrapy.Item):
     company_type = scrapy.Field() # Company type
     experience = scrapy.Field() # job experience requirements
     link = scrapy.Field() # job web page link
+    # pass
