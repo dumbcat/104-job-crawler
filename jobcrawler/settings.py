@@ -46,6 +46,7 @@ DEFAULT_REQUEST_HEADERS = {
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
   'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
   'Accept-Encoding': 'gzip, deflate, br',
+  # 'Referer':'https://www.104.com.tw/job/5p1ss?jobsource=2018indexpoc',
 }
 # Enable or disable spider middlewares
 # See https://docs.scrapy.org/en/latest/topics/spider-middleware.html
@@ -91,3 +92,8 @@ SQLITE_DB_NAME = '104.db'
 #HTTPCACHE_DIR = 'httpcache'
 #HTTPCACHE_IGNORE_HTTP_CODES = []
 #HTTPCACHE_STORAGE = 'scrapy.extensions.httpcache.FilesystemCacheStorage'
+
+COMMANDS_MODULE = 'jobcrawler.commands'
+LOG_FILE = 'logs.txt'
+LOG_LEVEL = 'INFO'
+DUPEFILTER_DEBUG = True

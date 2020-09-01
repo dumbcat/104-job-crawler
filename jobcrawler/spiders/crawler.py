@@ -1,112 +1,172 @@
-from jobcrawler.items import JobcrawlerItem
-import scrapy
-import requests
-import pandas as pd
-from selenium import webdriver
-from scrapy.selector import Selector
-import time
-from bs4 import BeautifulSoup as bs
+import urllib
 
-# TODO: How to crawl job categories
-# TODO: Job detail JSON: ttps://www.104.com.tw/job/ajax/content/63ixm need 'Referer': 'https://www.104.com.tw/job/63ixm?jobsource=2018indexpoc'
+import pandas as pd
+import requests
+import scrapy
+
+from jobcrawler.items import JobcrawlerItem
+
 
 class JobSpider(scrapy.Spider):
     name = '104'
     allowed_domains = ['104.com.tw']
-    # start_urls = []
+    # start_urls = [https://www.104.com.tw/jobs/search/]
 
-    def __init__(self):
-        self.browser = webdriver.Chrome()
-
-        """Convert area names of Taiwan from JSON into DataFrame"""
-        url = 'https://static.104.com.tw/category-tool/json/Area.json'
-        resp = requests.get(url)
-        df1 = []
-
-        for i in resp.json()[0]['n']:
-            # Only crawler Kaohsing for test
-            if i['no'] == '6001016000':
-                # Convert the districts of each city into DataFrame
-                ndf = pd.DataFrame(i['n'])
-                # Add city name field to DataFrame
-                ndf['city'] = i['des']
-                ndf['city_no'] = i['no']
-                df1.append(ndf)
-
-        # Concatenate all DataFrames
-        df1 = pd.concat(df1, ignore_index=True)
-        # Rearrange the order of columns, and sort data by no
-        df1 = df1[['city', 'city_no', 'des', 'no']]
-        self.df1 = df1.sort_values('no')
-
-        """ Convert job categories from JSON into DataFrame """
-        url = 'https://static.104.com.tw/category-tool/json/JobCat.json'
-        resp = requests.get(url)
-        df2 = []
-
-        for i in resp.json():
-            # Get all sub-categories in a main category
-            for j in i['n']:
-                # Convert the job title of each sub-category into DataFrame
-                ndf = pd.DataFrame(j['n'])
-                # Add main category field to DataFrame
-                ndf['des1'] = i['des']
-                # Add sub-categories field to DataFrame
-                ndf['des2'] = j['des']
-                df2.append(ndf)
-
-        # Concatenate all DataFrames
-        df2 = pd.concat(df2, ignore_index=True)
-        # Rearrange the order of columns, and sort data by no
-        df2 = df2[['des1', 'des2', 'des', 'no']]
-        self.df2 = df2.sort_values('no')
+    def __init__(self, main_city_no, df_subarea, df_jobcat):
+        self.main_city_no = main_city_no
+        self.df_subarea = df_subarea
+        self.df_jobcat = df_jobcat
 
     def start_requests(self):
-        for city_no, areades, areacode in zip(self.df1['city_no'], self.df1['des'], self.df1['no']):
-        # for jobdes1, jobdes2, jobdes, jobcode in zip(self.df2['des1'], self.df2['des2'], self.df2['des'], self.df2['no']):
-            url = (f'https://www.104.com.tw/jobs/search/?ro=0&jobcat=2005002004&jobcatExpansionType=0&area={arecode}&order=11&asc=0&page=1&mode=s&jobsource=n_my104_search')
-            yield scrapy.Request(
-                url=url,
-                callback=self.parse,
-                cb_kwargs={'areades': areades, 'city_no': city_no})
+        """Generate the url of each district and job sub-sub-category, and
+        sents it to parse_first_page for parse
 
-    def parse(self, response, areades, city_no):
-        self.browser.get(response.url)
+        Yields:
+            object: The request object of first page of each district and job
+                sub-sub-category
+        """
+        self.url = f'https://www.104.com.tw/jobs/search/?'
 
-        for i in range(20):
-            self.browser.execute_script(
-                'window.scrollTo(0, document.body.scrollHeight);')
-            time.sleep(0.5)
+        for city_no, areades, areacode in zip(self.df_subarea['city_no'],
+                                              self.df_subarea['des'],
+                                              self.df_subarea['no']):
+            for jobdes1, jobdes2, jobdes, jobcode in zip(
+                self.df_jobcat['des1'], self.df_jobcat['des2'],
+                self.df_jobcat['des'], self.df_jobcat['no']
+            ):
+                querystring = {
+                    'ro': '0',
+                    'jobcatExpansionType': '0',
+                    'order': '11',
+                    'asc': '0',
+                    'mode': 's',
+                    'jobsource': '2018indexpoc',
+                }
+                querystring['jobcat'] = jobcode
+                querystring['area'] = areacode
+                search_url = self.url + urllib.parse.urlencode(querystring)
 
-        k = 1
-        while k != 0:
-            try:
-                self.browser.find_elements_by_class_name(
-                    "js-more-page",)[-1].click()
-                print(f'手動載入第 {15 + k} 頁')
-                k += 1
-                time.sleep(0.5)
-            except:
-                k = 0
-                print('No more Job')
+                yield scrapy.Request(
+                    url=search_url,
+                    callback=self.parse_first_page,
+                    cb_kwargs={'city_no': city_no, 'areades': areades,
+                               'jobdes': jobdes, 'querystring': querystring})
 
-        sel = Selector(text=self.browser.page_source)
+    def parse_first_page(self, response, city_no, areades, jobdes, querystring):
+        """Parse first page of each district and job sub-sub-category, then
+        sents remaining pages to parse_pagination for continue parse and sents
+        parse result of first page to pipeline
 
-        # Exclude job advertisements when parsing
-        # targets = sel.xpath(
-        #     "//article[contains(@class, 'js-job-item') and not(contains(@class, 'b-block--ad'))]")
+        Args:
+            response (object): Response object of first page
+            city_no (string): The city number, used for table name of database
+                            in pipeline
+            areades (string): The description of districts
+            jobdes (string): The description of job sub-sub-category
+            querystring (dictionary): The query string of url
 
-        # Include job advertisements when parsing
-        targets = sel.xpath("//article[contains(@class, 'js-job-item')]")
+        Yields:
+            object: Sent the items object has been scraped to the item pipeline
+            object: Sent request object of remaining pages to next parse
+        """
 
+        # Get total page and query requests of paginations
+        res = response.xpath('//script/text()').re_first('"totalPage":\d+')
+        if res:
+            total_page = int(res.split(':')[1])
+        else:
+            total_page = 0
+
+        # If total page is 0, means no result of this district and job
+        # sub-sub-category
+        if total_page != 0:
+            info_string = (
+                f'First Page: {city_no} '
+                f'{areades}({response.url.split("&")[-1]}) '
+                f'{jobdes}({response.url.split("&")[-2]}), '
+                f'get total page(s): {total_page}'
+            )
+            print(f'\033[96m{info_string}\033[0m')
+            self.logger.info(f'{info_string}')
+
+            targets = response.xpath(
+                """
+                //article[contains(@class, 'js-job-item') and 
+                not(contains(@class, 'b-block--ad')) and 
+                not(contains(@class, 'js-job-item--recommend'))]
+                """
+            )
+            items = JobcrawlerItem()
+            for target in targets:
+                items['city_no'] = city_no
+                items['areades'] = areades
+                items['job_titile'] = target.xpath("@data-job-name").get()
+                items['company'] = target.xpath("@data-cust-name").get()
+                items['company_type'] = target.xpath("@data-indcat-desc").get()
+                items['experience'] = target.xpath(
+                    "div[1]/ul[2]/li[2]/text()").get()
+                items['link'] = 'https:' + \
+                    target.xpath("div[1]/h2/a/@href").get().split('?')[0]
+                yield items
+
+            for page in range(1, total_page):
+                querystring['page'] = page + 1
+                search_url = self.url + urllib.parse.urlencode(querystring)
+
+                yield scrapy.Request(
+                    url=search_url,
+                    callback=self.parse_pagination,
+                    cb_kwargs={'city_no': city_no,
+                               'areades': areades, 'jobdes': jobdes, },
+                )
+        else:
+            warning_string = (
+                f'{total_page} Page found: {city_no} '
+                f'{areades}({response.url.split("&")[-1]}) '
+                f'{jobdes}({response.url.split("&")[-2]})'
+            )
+            print(f'\033[31m{warning_string}\033[0m')
+            self.logger.warning(f'{warning_string}')
+
+    def parse_pagination(self, response, city_no, areades, jobdes):
+        """Parse the pagination of each district and job sub-sub-category,
+        then sends parse result to pipeline
+
+        Args:
+            response (object): Response object of pagination
+            city_no (string): The city number, used for table name of database 
+                            in pipeline
+            areades (string): The description of districts
+            jobdes (string): The description of job sub-sub-category
+
+        Yields:
+            object: Sents the items object has been scraped to the item pipeline
+        """
+
+        info_string = (
+            f'Paginations {response.url.split("&")[-1]} of {city_no} '
+            f'{areades}({response.url.split("&")[-2]}) '
+            f'{jobdes}({response.url.split("&")[-3]})'
+        )
+        print(f'\033[32m{info_string}\033[0m')
+        self.logger.info(f'{info_string}')
+
+        targets = response.xpath(
+            """
+            //article[contains(@class, 'js-job-item') and 
+            not(contains(@class, 'b-block--ad')) and 
+            not(contains(@class, 'js-job-item--recommend'))]
+            """
+        )
         items = JobcrawlerItem()
-
-        for index, target in enumerate(targets):
+        for target in targets:
             items['city_no'] = city_no
             items['areades'] = areades
             items['job_titile'] = target.xpath("@data-job-name").get()
             items['company'] = target.xpath("@data-cust-name").get()
             items['company_type'] = target.xpath("@data-indcat-desc").get()
-            items['experience'] = target.xpath("div[1]/ul[2]/li[2]/text()").get()
-            items['link'] = 'https:' + target.xpath("div[1]/h2/a/@href").get()
-            yield(items)
+            items['experience'] = target.xpath(
+                "div[1]/ul[2]/li[2]/text()").get()
+            items['link'] = 'https:' + \
+                target.xpath("div[1]/h2/a/@href").get().split('?')[0]
+            yield items
